@@ -1,0 +1,1193 @@
+---
+title: "Final Analysis"
+output:
+  md_document:
+    variant: markdown_github
+---
+
+### Packages + Functions
+```{r setup, include=FALSE}
+pacman::p_load(
+  rethinking,
+  brms,
+  tidyverse,
+  bayesplot,
+  viridis,
+  dplyr,
+  data.table,
+  ggplot2,
+  BayesCombo,
+  beepr,
+  ggplot2,
+  patchwork
+)
+```
+
+### Exploring Data
+```{r}
+setwd("C:/Users/louis/OneDrive - Aarhus universitet/AU Onedrive - RIGTIG/- 4. Semester/Social and Cultural Dynamics in Cognition/Exam related/Coding/data")
+
+# Reading data
+d <- read.csv("FINAL_DATA.csv")
+
+# turn ID into factor
+d$ID <- as.factor(d$ID)
+
+# check if any NA's
+d[!complete.cases(d), ]
+
+# Adding log RTs to the data frame
+d$RT_log <- log(d$RT)
+summary(d$RT_log)
+
+# Adding a column with the approximate ndt subtracted
+d$RT_log_ndt <- log(d$RT - 200)
+summary(d$RT_log_ndt)
+
+# Summary statistics
+mean(d$RT_log)
+sd(d$RT_log)
+
+# Adding scaled empathy measures
+d$totalemp_scaled <- scale(d$totalemp)
+d$cogemp_scaled <- scale(d$cogemp)
+d$affemp_scaled <- scale(d$affemp)
+
+
+# Subsetting into data sets
+y <- subset(d, correctresponse == "yes" & (accuracy == "correct" | accuracy == "incorrect"))
+# Yes-trials, excluding late responses: 3552 yes trials, removing 6 late trials = 3546
+n <- subset(d, correctresponse == "no")
+# No-trials (all responses)
+c <- subset(d, accuracy == "correct")
+# All trials, only correct responses
+cy <- subset(c, correctresponse == "yes")
+# Yes-trials, only correct responses
+d_nolate <- subset(d, accuracy == "correct" | accuracy == "incorrect")
+
+
+# Participant stats
+test <- d %>% group_by(ID) %>% summarise (mean_age = mean(age))
+mean(test$mean_age)
+sd(test$mean_age)
+min(test$mean_age)
+max(test$mean_age)
+```
+
+
+### Preliminary Analysis
+
+## RT: Testing yes-no against each other - is there a difference?
+```{r}
+# Model formula
+RT_response <- bf(RT|trunc(ub = 2000) ~ 0 + condition : correctresponse + condition : consistency : correctresponse + (0 + condition : correctresponse + condition : consistency : correctresponse | ID))
+
+# Defining priors
+get_prior(RT_response, c, family = shifted_lognormal())
+
+RT_prior_response <- c(
+  prior(normal(6.4, 0.2), class = b, coef = conditionA:correctresponseno),
+  prior(normal(6.4, 0.2), class = b, coef = conditionA:correctresponseyes),
+  prior(normal(6.4, 0.2), class = b, coef = conditionO:correctresponseno),
+  prior(normal(6.4, 0.2), class = b, coef = conditionO:correctresponseyes),
+  prior(normal(0, 0.2), class = b, coef = conditionA:correctresponseno:consistencyincon),
+  prior(normal(0, 0.2), class = b, coef = conditionA:correctresponseyes:consistencyincon),
+  prior(normal(0, 0.2), class = b, coef = conditionO:correctresponseno:consistencyincon),
+  prior(normal(0, 0.2), class = b, coef = conditionO:correctresponseyes:consistencyincon),
+  prior(normal(0, 0.2), class = sigma),
+  prior(normal(0, 0.2), class = sd),
+  prior(lkj(1), class = cor)
+)
+
+# Prior predictive check
+RT_prior_response_m <- brm(
+  RT_response,
+  data = c,
+  family = shifted_lognormal(),
+  prior = RT_prior_response,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+pp_check(RT_prior_response_m, nsamples = 1000)
+
+# Model
+RT_response_m <- brm(
+  RT_response,
+  data = c,
+  family = shifted_lognormal(),
+  prior = RT_prior_response,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Prior and posterior check together
+pp_check(RT_prior_response_m, nsamples = 1000) + pp_check(RT_response_m, nsamples = 1000)
+
+## Trace plots
+mcmc_trace(RT_response_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(RT_response_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(RT_response_m)
+
+## Posterior update check (Has the posterior learned from the prior?)
+plot(hypothesis(RT_response_m,"conditionA:correctresponseno > 0"))
+plot(hypothesis(RT_response_m,"conditionA:correctresponseyes > 0"))
+plot(hypothesis(RT_response_m,"conditionO:correctresponseno > 0"))
+plot(hypothesis(RT_response_m,"conditionO:correctresponseyes > 0"))
+
+plot(hypothesis(RT_response_m,"conditionA:correctresponseno:consistencyincon > 0"))
+plot(hypothesis(RT_response_m,"conditionA:correctresponseyes:consistencyincon > 0"))
+plot(hypothesis(RT_response_m,"conditionO:correctresponseno:consistencyincon > 0"))
+plot(hypothesis(RT_response_m,"conditionO:correctresponseyes:consistencyincon > 0"))
+
+plot(hypothesis(RT_response_m,"conditionA:correctresponseno > 0", class = "sd", group = "ID"))
+plot(hypothesis(RT_response_m,"conditionA:correctresponseyes > 0", class = "sd", group = "ID"))
+plot(hypothesis(RT_response_m,"conditionO:correctresponseno > 0", class = "sd", group = "ID"))
+plot(hypothesis(RT_response_m,"conditionO:correctresponseyes > 0", class = "sd", group = "ID"))
+
+plot(hypothesis(RT_response_m,"conditionA:correctresponseno:consistencyincon > 0", class = "sd", group = "ID"))
+plot(hypothesis(RT_response_m,"conditionA:correctresponseyes:consistencyincon > 0", class = "sd", group = "ID"))
+plot(hypothesis(RT_response_m,"conditionO:correctresponseno:consistencyincon > 0", class = "sd", group = "ID"))
+plot(hypothesis(RT_response_m,"conditionO:correctresponseyes:consistencyincon > 0", class = "sd", group = "ID"))
+
+# Actual hypothesis testing
+hypothesis(RT_response_m, "conditionA:correctresponseno:consistencyincon < conditionA:correctresponseyes:consistencyincon")  # less consistency effect in no in arrow
+hypothesis(RT_response_m, "conditionO:correctresponseno:consistencyincon = conditionO:correctresponseyes:consistencyincon") # pretty much the same consistency effect in avatar
+```
+
+## Incorrect: Testing yes-no against each other - is there a difference?
+```{r}
+# Model formula
+E_response <- bf(accuracy ~ 0 + condition : correctresponse + condition : consistency : correctresponse + (0 + condition : correctresponse + condition : consistency : correctresponse | ID))
+
+# Defining priors
+get_prior(E_response, d_nolate, family = bernoulli())
+
+E_prior_response <- c(
+  prior(normal(-3, 1.5), class = b, coef = conditionA:correctresponseno),
+  prior(normal(-3, 1.5), class = b, coef = conditionA:correctresponseyes),
+  prior(normal(-3, 1.5), class = b, coef = conditionO:correctresponseno),
+  prior(normal(-3, 1.5), class = b, coef = conditionO:correctresponseyes),
+  prior(normal(0, 1.5), class = b, coef = conditionA:correctresponseno:consistencyincon),
+  prior(normal(0, 1.5), class = b, coef = conditionA:correctresponseyes:consistencyincon),
+  prior(normal(0, 1.5), class = b, coef = conditionO:correctresponseno:consistencyincon),
+  prior(normal(0, 1.5), class = b, coef = conditionO:correctresponseyes:consistencyincon),
+  prior(normal(0, 1.5), class = sd),
+  prior(lkj(1), class = cor)
+)
+
+# Prior predictive check
+E_prior_response_m <- brm(
+  E_response,
+  data = d_nolate,
+  family = bernoulli(),
+  prior = E_prior_response,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+y_pred <- posterior_linpred(E_prior_response_m)
+p <- dens(inv_logit(y_pred))
+
+# Model
+E_response_m <- brm(
+  E_response,
+  data = d_nolate,
+  family = bernoulli(),
+  prior = E_prior_response,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Posterior predictive check
+y_pred <- posterior_linpred(E_response_m)
+p <- dens(inv_logit(y_pred))
+
+## Trace plots
+mcmc_trace(E_response_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(E_response_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(E_response_m)
+
+## Posterior update check (Has the posterior learned from the prior?)
+plot(hypothesis(E_response_m,"conditionA:correctresponseno > 0"))
+plot(hypothesis(E_response_m,"conditionA:correctresponseyes > 0"))
+plot(hypothesis(E_response_m,"conditionO:correctresponseno > 0"))
+plot(hypothesis(E_response_m,"conditionO:correctresponseyes > 0"))
+
+plot(hypothesis(E_response_m,"conditionA:correctresponseno:consistencyincon > 0"))
+plot(hypothesis(E_response_m,"conditionA:correctresponseyes:consistencyincon > 0"))
+plot(hypothesis(E_response_m,"conditionO:correctresponseno:consistencyincon > 0"))
+plot(hypothesis(E_response_m,"conditionO:correctresponseyes:consistencyincon > 0"))
+
+plot(hypothesis(E_response_m,"conditionA:correctresponseno > 0", class = "sd", group = "ID"))
+plot(hypothesis(E_response_m,"conditionA:correctresponseyes > 0", class = "sd", group = "ID"))
+plot(hypothesis(E_response_m,"conditionO:correctresponseno > 0", class = "sd", group = "ID"))
+plot(hypothesis(E_response_m,"conditionO:correctresponseyes > 0", class = "sd", group = "ID"))
+
+plot(hypothesis(E_response_m,"conditionA:correctresponseno:consistencyincon > 0", class = "sd", group = "ID"))
+plot(hypothesis(E_response_m,"conditionA:correctresponseyes:consistencyincon > 0", class = "sd", group = "ID"))
+plot(hypothesis(E_response_m,"conditionO:correctresponseno:consistencyincon > 0", class = "sd", group = "ID"))
+plot(hypothesis(E_response_m,"conditionO:correctresponseyes:consistencyincon > 0", class = "sd", group = "ID"))
+
+# Actual hypothesis testing
+hypothesis(E_response_m, "conditionA:correctresponseno:consistencyincon > conditionA:correctresponseyes:consistencyincon")
+hypothesis(E_response_m, "conditionO:correctresponseno:consistencyincon > conditionO:correctresponseyes:consistencyincon")
+```
+
+
+### Hypothesis 1: Is the consistent effect bigger in avatar compared to arrow condition?
+
+## RT
+# Looking at what could be nice values for priors
+```{r}
+# Calculating sd (ndt)
+mean_RT_log_ndt <- cy %>% 
+  group_by(ID) %>%
+  summarise(mean = mean(RT_log_ndt))
+
+sd(mean_RT_log_ndt$mean)
+summary(mean_RT_log_ndt$mean)
+```
+
+# RT model - RT_f/RT_m
+```{r}
+# Model formula
+RT_f <- bf(RT|trunc(ub = 2000) ~ 0 + condition + condition : consistency + (0 + condition + condition : consistency|ID))
+
+# Prior
+RT_prior <- c(
+  prior(normal(6.3, 0.2), class = b, coef = conditionA),
+  prior(normal(6.3, 0.2), class = b, coef = conditionO),
+  prior(normal(0, 0.2), class = b, coef = conditionA:consistencyincon),
+  prior(normal(0, 0.2), class = b, coef = conditionO:consistencyincon),
+  prior(normal(0, 0.2), class = sigma),
+  prior(normal(0, 0.2), class = sd),
+  prior(lkj(1), class = cor)
+)
+
+# Prior predictive check
+RT_prior_m <- brm(
+  RT_f,
+  data = cy,
+  family = shifted_lognormal(),
+  prior = RT_prior,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+pp_check(RT_prior_m, nsamples = 1000)
+
+# Model
+RT_m <- brm(
+  RT_f,
+  data = cy,
+  family = shifted_lognormal(),
+  prior = RT_prior,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 2000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Prior and posterior check besides each other
+pp_check(RT_prior_m, nsamples = 1000) + pp_check(RT_m, nsamples = 1000)
+
+# Trace plots
+mcmc_trace(RT_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(RT_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(RT_m)
+
+## Posterior update check (Has the posterior learned from the prior?)
+# plot(hypothesis(RT_m,"conditionA > 0"))
+# plot(hypothesis(RT_m,"conditionO > 0"))
+# plot(hypothesis(RT_m,"conditionA:consistencyincon > 0"))
+# plot(hypothesis(RT_m,"conditionO:consistencyincon > 0"))
+# plot(hypothesis(RT_m,"conditionA > 0", class = "sd", group = "ID"))
+# plot(hypothesis(RT_m,"conditionO > 0", class = "sd", group = "ID"))
+# plot(hypothesis(RT_m,"conditionA:consistencyincon > 0", class = "sd", group = "ID"))
+# plot(hypothesis(RT_m,"conditionO:consistencyincon > 0", class = "sd", group = "ID"))
+# plot(hypothesis(RT_m, "ID__conditionA__conditionA:consistencyincon > 0", class = "cor"))
+# plot(hypothesis(RT_m, "ID__conditionA__conditionO > 0", class = "cor"))
+
+# (almost) ALL IN ONE PLOT
+p1 <- plot(hypothesis(RT_m,c(
+  "conditionA > 0",
+  "conditionO > 0",
+  "conditionA:consistencyincon > 0",
+  "conditionO:consistencyincon > 0")),
+  plot = F, theme = theme_get())[[1]]
+p1 +
+  ggtitle(label = "Prior and Posterior Distributions\nof Fixed Effect Estimates") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+p2 <- plot(hypothesis(RT_m, c(
+  "conditionO > 0",
+  "conditionA > 0",
+  "conditionA:consistencyincon > 0",
+  "conditionO:consistencyincon > 0"),
+  class = "sd", group = "ID"),
+  plot = F, theme = theme_get())[[1]]
+p2 +
+  ggtitle(label = "Prior and Posterior Distributions\nof Varying Effect Estimates") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Prior and posterior distributions together in plot for sigma
+prior <- prior_samples(RT_m)
+post <- posterior_samples(RT_m)
+plot(density(prior$sigma), ylim=c(0,41), lty = 3, main = "Prior and posterior for sigma")
+lines(density(post$sigma), lty = 1)
+
+# Testing actual hypotheses
+hypothesis(RT_m,"conditionA:consistencyincon > 0")
+plot(hypothesis(RT_m,"conditionA:consistencyincon > 0"))
+
+hypothesis(RT_m,"conditionO:consistencyincon > 0")
+plot(hypothesis(RT_m,"conditionO:consistencyincon > 0"))
+
+hypothesis(RT_m,"conditionO:consistencyincon > conditionA:consistencyincon")
+plot(hypothesis(RT_m,"conditionO:consistencyincon > conditionA:consistencyincon"))
+
+# Predictions on the outcome scale (RT in ms)
+cy$predictions <- predict(RT_m)
+
+RT_pred <- cy %>% 
+  group_by(condition, consistency) %>% 
+  summarise(mean_pred = mean(predictions),
+            sd_pred = sd(predictions))
+
+RT_pred
+```
+
+# Plotting RT model
+```{r}
+# Calculate mean and sd for conditions
+cy_meansd <- cy %>%
+  group_by(condition, consistency) %>% 
+  summarise(mean = mean(RT), 
+            sd = sd(RT))
+
+# Change names
+cy_meansd$condition <- ifelse(cy_meansd$condition == "A", "Arrow", "Avatar")
+cy_meansd$consistency <- ifelse(cy_meansd$consistency == "con", "Consistent", "Inconsistent")
+
+# Make plot
+ggplot(cy_meansd, aes(x=condition, y=mean, fill= consistency)) + 
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2,position=position_dodge(.9)) +
+  labs(title = "Mean Reaction Time for Arrow and Avatar Condition\nin Consistent and Inconsistent Trials",  
+       x="Condition", y = "Mean RT in ms", leged = "Consistency") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_fill_manual(name = "Consistency", values=c("slategray2","slategray4"))
+```
+
+
+## Incorrect
+# Looking at what could be nice values for priors
+```{r}
+# Calculating mean/sd
+percE <- y %>% 
+  group_by(ID) %>%
+  summarize(incorrect = length(which(accuracy == "incorrect")), 
+            correct = length(which(accuracy == "correct")),
+            ratio = incorrect/(correct+incorrect))
+
+mean(percE$ratio)
+sd(percE$ratio)
+```
+
+# Incorrect/Error model - E_f/E_m
+```{r}
+# Model formula
+E_f <- bf(accuracy ~ 0 + condition + condition : consistency + (0 + condition + condition : consistency|ID))
+
+# Priors
+get_prior(E_f, y, family = bernoulli())
+
+E_prior <- c(
+  prior(normal(-2, 1.5), class = b, coef = conditionA),
+  prior(normal(-2, 1.5), class = b, coef = conditionO),
+  prior(normal(0, 1.5), class = b, coef = conditionA:consistencyincon),
+  prior(normal(0, 1.5), class = b, coef = conditionO:consistencyincon),
+  prior(normal(0, 1.5), class = sd),
+  prior(lkj(1), class = cor)
+)
+
+# Prior predictive check
+E_prior_m <- brm(
+  E_f,
+  data = y,
+  family = bernoulli(),
+  prior = E_prior,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+y_pred <- posterior_linpred(E_prior_m)
+p <- dens(inv_logit(y_pred))
+
+# Model
+E_m <- brm(
+  E_f,
+  data = y,
+  family = bernoulli(),
+  prior = E_prior,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Posterior predictive check
+y_pred <- posterior_linpred(E_m)
+q <- dens(inv_logit(y_pred))
+
+# Trace plots
+mcmc_trace(E_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(E_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(E_m)
+
+## Posterior update check (Has the posterior learned from the prior?)
+# plot(hypothesis(E_m,"conditionA > 0"))
+# plot(hypothesis(E_m,"conditionO > 0"))
+# plot(hypothesis(E_m,"conditionA:consistencyincon > 0"))
+# plot(hypothesis(E_m,"conditionO:consistencyincon > 0"))
+# plot(hypothesis(E_m,"conditionA > 0", class = "sd", group = "ID"))
+# plot(hypothesis(E_m,"conditionO > 0", class = "sd", group = "ID"))
+# plot(hypothesis(E_m,"conditionA:consistencyincon > 0", class = "sd", group = "ID"))
+# plot(hypothesis(E_m,"conditionO:consistencyincon > 0", class = "sd", group = "ID"))
+# plot(hypothesis(E_m, "ID__conditionA__conditionA:consistencyincon > 0", class = "cor"))
+# plot(hypothesis(E_m, "ID__conditionA__conditionO > 0", class = "cor"))
+
+# Plotting these together
+p1 <- plot(hypothesis(E_m,c(
+  "conditionA > 0",
+  "conditionO > 0",
+  "conditionA:consistencyincon > 0",
+  "conditionO:consistencyincon > 0")),
+  plot = F, theme = theme_get())[[1]]
+p1 +
+  ggtitle(label = "Prior and Posterior Distributions\nof Fixed Effect Estimates") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+p2 <- plot(hypothesis(E_m, c(
+  "conditionO > 0",
+  "conditionA > 0",
+  "conditionA:consistencyincon > 0",
+  "conditionO:consistencyincon > 0"),
+  class = "sd", group = "ID"),
+  plot = F, theme = theme_get())[[1]]
+p2 +
+  ggtitle(label = "Prior and Posterior Distributions\nof Varying Effect Estimates") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Actual hypotheses
+hypothesis(E_m,"conditionA:consistencyincon > 0")
+plot(hypothesis(E_m,"conditionA:consistencyincon > 0"))
+
+hypothesis(E_m,"conditionO:consistencyincon > 0")
+plot(hypothesis(E_m,"conditionO:consistencyincon > 0"))
+
+hypothesis(E_m,"conditionO:consistencyincon > conditionA:consistencyincon")
+plot(hypothesis(E_m,"conditionO:consistencyincon > conditionA:consistencyincon"))
+```
+
+# Plotting Incorrect/Error model
+```{r}
+# Making subset
+percE <- d %>% 
+  group_by(ID, consistency, condition) %>% 
+  summarize(incorrect = length(which(accuracy == "incorrect")), 
+            correct = length(which(accuracy == "correct")),
+            ratio = (incorrect/(correct+incorrect)*100))
+
+# Calculating mean and sd of IDs
+percEmean <- percE %>% group_by(condition, consistency) %>% 
+  summarize(mean = mean(ratio), 
+            sd = sd(ratio))
+
+# Changing names
+percEmean$condition <- ifelse(percEmean$condition == "A", "Arrow", "Avatar")
+percEmean$consistency <- ifelse(percEmean$consistency == "con", "Consistent", "Inconsistent")
+
+# Making plot
+colors <- c("Sepal Width" = "blue", "Petal Length" = "red", "Petal Width" = "orange")
+ggplot(percEmean, aes(x=condition, y=mean, fill= consistency)) + 
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2,position=position_dodge(.9)) +
+  labs(title = "Mean Percentage of Incorrect Responses for Arrow and Avatar Condition\nin Consistent and Inconsistent Trials", x="Condition", y = "Mean Percentage of Incorrect Responses", legend = "Consistency") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_fill_manual(name = "Consistency", values=c("slategray2","slategray4"))
+```
+
+
+### Hypothesis 2: Can the individual variance be explained by level of total empathy?
+
+## RT
+# Preprocessing
+```{r}
+# Extracting the posterior of varying effects from the RT model
+var_eff <- data.frame(ranef(RT_m, summary = T))[,13:14]
+var_eff$ID <- as.factor(c(1:37))
+
+# Renaming columns
+names(var_eff)[1] <- "vary_slope"
+names(var_eff)[2] <- "error"
+
+# Merging the varying effects with the actual data per participant
+cy_emp <- merge(var_eff, cy[,c(1, 24:26)], by = "ID")
+
+# Summarising a single value for each participant
+cy_emp <- cy_emp %>% 
+  group_by(ID) %>% 
+  summarize(vary_slope = mean(vary_slope),
+            totalemp_scaled = mean(totalemp_scaled),
+            affemp_scaled = mean(affemp_scaled),
+            cogemp_scaled = mean(cogemp_scaled))
+
+# Scaling the varying effects to make sure that we can use the beta as Pearson's R (when both outcome and predictors are scaled)
+cy_emp$vary_slope_scaled <- scale(cy_emp$vary_slope)[,]
+
+# Summary statistics of this (to check the scaling has worked)
+mean(cy_emp$vary_slope_scaled)
+sd(cy_emp$vary_slope_scaled)
+```
+
+# Total empathy score
+```{r}
+# Model formula
+RT_totalemp_vary <- bf(vary_slope_scaled ~ 1 + totalemp_scaled)
+
+# Priors
+get_prior(RT_totalemp_vary, cy_emp, family = gaussian)
+
+RT_emp_prior <- c(
+  prior(normal(0, 1), class = Intercept), # Reflecting the mean and sd after standardising
+  prior(normal(0, 1), class = b),
+  prior(normal(0, 1), class = sigma)
+)
+
+# Prior predictive check
+RT_total_prior_m <- brm(
+  RT_totalemp_vary,
+  data = cy_emp,
+  family = gaussian(),
+  prior = RT_emp_prior,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+pp_check(RT_total_prior_m, nsamples = 1000)
+
+# Model
+RT_total_m <- brm(
+  RT_totalemp_vary,
+  data = cy_emp,
+  family = gaussian(),
+  prior = RT_emp_prior,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Posterior check
+pp_check(RT_total_m, nsamples = 1000)
+
+# Trace plots
+mcmc_trace(RT_total_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(RT_total_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(RT_total_m)
+
+# Plotting posterior against prior distribution - has the posterior learned?
+plot(hypothesis(RT_total_m,"totalemp_scaled > 0"))
+
+prior <- prior_samples(RT_total_m)
+post <- posterior_samples(RT_total_m)
+plot(density(prior$Intercept), ylim=c(0,2.5), lty = 3, main = "Prior and posterior for the intercept")
+lines(density(post$b_Intercept), lty = 1)
+
+plot(density(prior$sigma), ylim=c(0,3.5), lty = 3, main = "Prior and posterior for sigma")
+lines(density(post$sigma), lty = 1)
+
+# Actual hypothesis testing
+hypothesis(RT_total_m,"totalemp_scaled > 0")
+```
+
+# Cognitive empathy score (for Hypothesis 2.1)
+```{r}
+# Model formula
+RT_cogemp_vary <- bf(vary_slope_scaled ~ 1 + cogemp_scaled)
+
+# Priors
+get_prior(RT_cogemp_vary, cy_emp, family = gaussian)
+
+RT_emp_prior <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 1), class = b),
+  prior(normal(0, 1), class = sigma)
+)
+
+# Prior predictive check
+RT_cog_prior_m <- brm(
+  RT_cogemp_vary,
+  data = cy_emp,
+  family = gaussian(),
+  prior = RT_emp_prior,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+pp_check(RT_cog_prior_m, nsamples = 1000)
+
+# Model
+RT_cog_m <- brm(
+  RT_cogemp_vary,
+  data = cy_emp,
+  family = gaussian(),
+  prior = RT_emp_prior,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Posterior check
+pp_check(RT_cog_m, nsamples = 1000)
+
+# Trace plots
+mcmc_trace(RT_cog_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(RT_cog_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(RT_cog_m)
+
+# Plotting posterior against prior distribution
+plot(hypothesis(RT_cog_m,"cogemp_scaled > 0"))
+
+prior <- prior_samples(RT_cog_m)
+post <- posterior_samples(RT_cog_m)
+plot(density(prior$Intercept), ylim=c(0,2.5), lty = 3, main = "Prior and posterior for the intercept")
+lines(density(post$b_Intercept), lty = 1)
+
+plot(density(prior$sigma), ylim=c(0,3.5), lty = 3, main = "Prior and posterior for sigma")
+lines(density(post$sigma), lty = 1)
+
+# Actual hypothesis testing
+hypothesis(RT_cog_m,"cogemp_scaled > 0")
+```
+
+# Affective empathy score (for Hypothesis 2.1)
+```{r}
+# Model formula
+RT_affemp_vary <- bf(vary_slope_scaled ~ 1 + affemp_scaled)
+
+# Priors
+get_prior(RT_affemp_vary, cy_emp, family = gaussian)
+
+RT_emp_prior <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 1), class = b),
+  prior(normal(0, 1), class = sigma)
+)
+
+# Prior predictive check
+RT_aff_prior_m <- brm(
+  RT_affemp_vary,
+  data = cy_emp,
+  family = gaussian(),
+  prior = RT_emp_prior,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+pp_check(RT_aff_prior_m, nsamples = 1000)
+
+# Model
+RT_aff_m <- brm(
+  RT_affemp_vary,
+  data = cy_emp,
+  family = gaussian(),
+  prior = RT_emp_prior,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Posterior check
+pp_check(RT_aff_m, nsamples = 1000)
+
+# Trace plots
+mcmc_trace(RT_aff_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(RT_aff_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(RT_aff_m)
+
+# Plotting posterior against prior
+plot(hypothesis(RT_aff_m,"affemp_scaled > 0"))
+
+prior <- prior_samples(RT_aff_m)
+post <- posterior_samples(RT_aff_m)
+plot(density(prior$Intercept), ylim=c(0,2.5), lty = 3, main = "Prior and posterior for the Intercept")
+lines(density(post$b_Intercept), lty = 1)
+
+plot(density(prior$sigma), ylim=c(0,3.5), lty = 3, main = "Prior and posterior for sigma")
+lines(density(post$sigma), lty = 1)
+
+# Actual hypothesis testing
+hypothesis(RT_aff_m,"affemp_scaled > 0")
+```
+
+# Plotting RT model(s)
+```{r}
+# Plot for total empathy
+p_RTemp <- ggplot(data = cy_emp, aes(y = vary_slope_scaled, x = totalemp_scaled)) + 
+  geom_point() + 
+  geom_smooth(aes(y = vary_slope_scaled, x = totalemp_scaled), method = lm, color = "slategray4") +
+  labs(title = "Relation between Scaled Total Empathy Scores\nand Scaled Varying Slopes (RT)", x="Scaled Total Empathy Scores", y = "Scaled Varying Slopes from Model 1.1 (RT)") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Plot for all empathy sclaes
+colors <- c("Total Empathy" = "black", "Cognitive Empathy" = "skyblue", "Affective Empathy" = "slategray4")
+
+ggplot(data = cy_emp) + 
+  #total emp
+  geom_point(aes(y = vary_slope_scaled, x = totalemp_scaled, color = "Total Empathy")) + 
+  geom_smooth(aes(y = vary_slope_scaled, x = totalemp_scaled), method = lm, color = "black") +
+  #cognitive
+  geom_point(aes(y = vary_slope_scaled, x = cogemp_scaled, color = "Cognitive Empathy")) + 
+  geom_smooth(aes(y = vary_slope_scaled, x = cogemp_scaled), method = lm, color = "skyblue") +
+  #affective
+  geom_point(aes(y = vary_slope_scaled, x = affemp_scaled, color = "Affective Empathy")) + 
+  geom_smooth(aes(y = vary_slope_scaled, x = affemp_scaled), method = lm, color = "slategray4") +
+  labs(title = "Relation between Scaled Empathy Scores\nand Scaled Varying Slopes (RT)", 
+       x="Scaled Empathy Scores", 
+       y = "Scaled Varying Slopes from Model 1.1 (RT)",
+       color = "Empathy Scale") +
+  scale_color_manual(values = colors) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+# Model comparison (Hypothesis 2.1 - RT)
+```{r}
+# Adding loo criterion
+RT_total_m <- add_criterion(RT_total_m, criterion = "loo", reloo = T)
+RT_cog_m <- add_criterion(RT_cog_m, criterion = "loo", reloo = T)
+RT_aff_m <- add_criterion(RT_aff_m, criterion = "loo", reloo = T)
+
+# Comparing loo
+loo_compare(RT_total_m, RT_cog_m, RT_aff_m)
+
+# Model weights
+loo_model_weights(RT_total_m, RT_cog_m, RT_aff_m)
+```
+
+
+## Incorrect
+# Preprocessing
+```{r}
+# The posterior of varying effects from the RT model
+var_eff <- data.frame(ranef(E_m, summary = T))[,13:14]
+var_eff$ID <- as.factor(c(1:37))
+
+# Renaming columns
+names(var_eff)[1] <- "vary_slope"
+names(var_eff)[2] <- "error"
+
+# Merging the varying effects with the actual data per participant
+y_emp <- merge(var_eff, y[,c(1, 2:3, 24:26)], by = "ID")
+
+# Summarising a single value for each participant
+y_emp <- y_emp %>% 
+  group_by(ID) %>% 
+  summarize(vary_slope = mean(vary_slope),
+            totalemp_scaled = mean(totalemp_scaled),
+            affemp_scaled = mean(affemp_scaled),
+            cogemp_scaled = mean(cogemp_scaled)
+)
+
+# Scaling the varying effects to make sure that we can use the beta as Pearson's R (when both outcome and predictors are scaled)
+y_emp$vary_slope_scaled <- scale(y_emp$vary_slope)[,]
+
+# Summary statistics (i.e. has the scaling worked)
+mean(y_emp$vary_slope_scaled)
+sd(y_emp$vary_slope_scaled)
+```
+
+# Total empathy score
+```{r}
+# Model formula
+E_totalemp_vary <- bf(vary_slope_scaled ~ 1 + totalemp_scaled)
+
+# Priors
+get_prior(E_totalemp_vary, y_emp, family = gaussian)
+
+E_emp_prior <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 1), class = b),
+  prior(normal(0, 1), class = sigma)
+)
+
+# Prior predictive check
+E_total_prior_m <- brm(
+  E_totalemp_vary,
+  data = y_emp,
+  family = gaussian(),
+  prior = E_emp_prior,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+pp_check(E_total_prior_m, nsamples = 100)
+
+# Model
+E_total_m <- brm(
+  E_totalemp_vary,
+  data = y_emp,
+  family = gaussian(),
+  prior = E_emp_prior,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Posterior check
+pp_check(E_total_m, nsamples = 1000)
+
+# Trace plots
+mcmc_trace(E_total_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(E_total_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(E_total_m)
+
+# Plotting posterior against prior
+plot(hypothesis(E_total_m,"totalemp_scaled > 0"))
+
+prior <- prior_samples(E_total_m)
+post <- posterior_samples(E_total_m)
+plot(density(prior$Intercept), ylim=c(0,2.5), lty = 3, main = "Prior and posterior for the intercept")
+lines(density(post$b_Intercept), lty = 1)
+
+plot(density(prior$sigma), ylim=c(0,3.5), lty = 3, main = "Prior and posterior for sigma")
+lines(density(post$sigma), lty = 1)
+
+# Actual hypothesis testing
+hypothesis(E_total_m,"totalemp_scaled > 0")
+
+# Plotting
+plot(conditional_effects(E_total_m), points = T)
+```
+
+# Cognitive empathy score (for Hypothesis 2.1)
+```{r}
+# Model formula
+E_cogemp_vary <- bf(vary_slope_scaled ~ 1 + cogemp_scaled)
+
+# Priors
+get_prior(E_cogemp_vary, y_emp, family = gaussian)
+
+E_emp_prior <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 1), class = b),
+  prior(normal(0, 1), class = sigma)
+)
+
+# Prior predictive check
+E_cog_prior_m <- brm(
+  E_cogemp_vary,
+  data = y_emp,
+  family = gaussian(),
+  prior = E_emp_prior,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+pp_check(E_cog_prior_m, nsamples = 1000)
+
+# Model
+E_cog_m <- brm(
+  E_cogemp_vary,
+  data = y_emp,
+  family = gaussian(),
+  prior = E_emp_prior,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Posterior check
+pp_check(E_cog_m, nsamples = 1000)
+
+# Trace plots
+mcmc_trace(E_cog_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(E_cog_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(E_cog_m)
+
+# Plotting posterior against prior
+plot(hypothesis(E_cog_m,"cogemp_scaled > 0"))
+
+prior <- prior_samples(E_cog_m)
+post <- posterior_samples(E_cog_m)
+plot(density(prior$Intercept), ylim=c(0,2.5), lty = 3, main = "Prior and posterior for the intercept")
+lines(density(post$b_Intercept), lty = 1)
+
+plot(density(prior$sigma), ylim=c(0,3.5), lty = 3, main = "Prior and posterior for sigma")
+lines(density(post$sigma), lty = 1)
+
+# Actual hypothesis testing
+hypothesis(E_cog_m,"cogemp_scaled > 0")
+
+# Plotting
+plot(conditional_effects(E_cog_m), points = T)
+```
+
+# Affective empathy score (for Hypothesis 2.1)
+```{r}
+# Model formula
+E_affemp_vary <- bf(vary_slope_scaled ~ 1 + affemp_scaled)
+
+# Priors
+get_prior(E_affemp_vary, y_emp, family = gaussian)
+
+E_emp_prior <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 1), class = b),
+  prior(normal(0, 1), class = sigma)
+)
+
+# Prior predictive check
+E_aff_prior_m <- brm(
+  E_affemp_vary,
+  data = y_emp,
+  family = gaussian(),
+  prior = E_emp_prior,
+  sample_prior = "only",
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+pp_check(E_aff_prior_m, nsamples = 1000)
+
+# Model
+E_aff_m <- brm(
+  E_affemp_vary,
+  data = y_emp,
+  family = gaussian(),
+  prior = E_emp_prior,
+  sample_prior = T,
+  chains = 4,
+  cores = 3,
+  iter = 4000,
+  seed = 28,
+  control = list(
+    adapt_delta = 0.95,
+    max_treedepth = 20
+  )
+)
+
+# Posterior check
+pp_check(E_aff_m, nsamples = 1000)
+
+# Trace plots
+mcmc_trace(E_aff_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+mcmc_rank_overlay(E_aff_m, pars = vars(-contains("["), -contains("prior"), -contains("lp"))) + theme_classic()
+
+# Quality check
+summary(E_aff_m)
+
+# Plotting posterior against prior
+plot(hypothesis(E_aff_m,"affemp_scaled > 0"))
+
+prior <- prior_samples(E_aff_m)
+post <- posterior_samples(E_aff_m)
+plot(density(prior$Intercept), ylim=c(0,2.5), lty = 3, main = "Prior and posterior for the intercept")
+lines(density(post$b_Intercept), lty = 1)
+
+plot(density(prior$sigma), ylim=c(0,3.5), lty = 3, main = "Prior and posterior for sigma")
+lines(density(post$sigma), lty = 1)
+
+# Actual hypothesis testing
+hypothesis(E_aff_m,"affemp_scaled > 0")
+
+# Plotting
+plot(conditional_effects(E_aff_m), points = T)
+```
+
+# Plotting Incorrect/Error model(s)
+```{r}
+# Plot total empathy - error
+p_Error_emp <- ggplot(data = y_emp, aes(y = vary_slope_scaled, x = totalemp_scaled)) + 
+  geom_point() + 
+  geom_smooth(aes(y =vary_slope_scaled, x = totalemp_scaled), method = lm, color = "slategray4") +
+  labs(title = "Relation between Scaled Total Empathy Scores\nand Scaled Varying Slopes (Incorrect)", x="Scaled Total Empathy Scores", y = "Scaled Varying Slopes from Model 1.2 (Incorrect)") +
+  theme(plot.title = element_text(hjust = 0.5))
+p_Error_emp
+
+# Plot for all empathy - error
+colors <- c("Total Empathy" = "black", "Cognitive Empathy" = "skyblue", "Affective Empathy" = "slategray4")
+
+ggplot(data = y_emp) + 
+  #total emp
+  geom_point(aes(y = vary_slope_scaled, x = totalemp_scaled, color = "Total Empathy")) + 
+  geom_smooth(aes(y = vary_slope_scaled, x = totalemp_scaled), method = lm, color = "black") +
+  #cognitive
+  geom_point(aes(y = vary_slope_scaled, x = cogemp_scaled, color = "Cognitive Empathy")) + 
+  geom_smooth(aes(y = vary_slope_scaled, x = cogemp_scaled), method = lm, color = "skyblue") +
+  #affective
+  geom_point(aes(y = vary_slope_scaled, x = affemp_scaled, color = "Affective Empathy")) + 
+  geom_smooth(aes(y = vary_slope_scaled, x = affemp_scaled), method = lm, color = "slategray4") +
+  labs(title = "Relation between Scaled Empathy Scores\nand Scaled Varying Slopes (Incorrect)", 
+       x="Scaled Empathy Scores", 
+       y = "Scaled Varying Slopes from Model 1.2 (Incorrect)", 
+       color = "Empathy Scale") +
+  scale_color_manual(values = colors) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+# Model comparison (Hypothesis 2.1 - Incorrect)
+```{r}
+# Adding loo criterion
+E_total_m <- add_criterion(E_total_m, criterion = "loo", reloo = T)
+E_cog_m <- add_criterion(E_cog_m, criterion = "loo", reloo = T)
+E_aff_m <- add_criterion(E_aff_m, criterion = "loo", reloo = T)
+
+# Comparing loo
+loo_compare(E_total_m, E_cog_m, E_aff_m)
+
+# Model weights
+loo_model_weights(E_total_m, E_cog_m, E_aff_m)
+```
